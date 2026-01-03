@@ -1,0 +1,411 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Trash2, Copy, Check, GripVertical } from 'lucide-react';
+
+const MinecraftGradientGenerator = () => {
+  const [text, setText] = useState('Frostbite');
+  const [colors, setColors] = useState([
+    { id: 0, color: '#FFFFFF', position: 0 },
+    { id: 1, color: '#9863E7', position: 100 }
+  ]);
+  const [output, setOutput] = useState('');
+  const [copied, setCopied] = useState(false);
+  const [draggingId, setDraggingId] = useState(null);
+  const [draggedItemId, setDraggedItemId] = useState(null);
+  const gradientRef = useRef(null);
+  const [nextId, setNextId] = useState(2);
+
+  const hexToRgb = (hex) => {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : null;
+  };
+
+  const rgbToHex = (r, g, b) => {
+    return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase();
+  };
+
+  const interpolateColor = (color1, color2, factor) => {
+    const c1 = hexToRgb(color1);
+    const c2 = hexToRgb(color2);
+    if (!c1 || !c2) return color1;
+    
+    const r = Math.round(c1.r + factor * (c2.r - c1.r));
+    const g = Math.round(c1.g + factor * (c2.g - c1.g));
+    const b = Math.round(c1.b + factor * (c2.b - c1.b));
+    return rgbToHex(r, g, b);
+  };
+
+  const generateGradient = () => {
+    if (!text || colors.length < 2) return '';
+    
+    const sortedColors = [...colors].sort((a, b) => a.position - b.position);
+    const chars = text.split('');
+    let result = '/rename ';
+    
+    chars.forEach((char, index) => {
+      const progress = chars.length > 1 ? (index / (chars.length - 1)) * 100 : 0;
+      
+      let startColorIndex = 0;
+      let endColorIndex = sortedColors.length - 1;
+      
+      for (let i = 0; i < sortedColors.length - 1; i++) {
+        if (progress >= sortedColors[i].position && progress <= sortedColors[i + 1].position) {
+          startColorIndex = i;
+          endColorIndex = i + 1;
+          break;
+        }
+      }
+      
+      const startColor = sortedColors[startColorIndex];
+      const endColor = sortedColors[endColorIndex];
+      
+      const segmentRange = endColor.position - startColor.position;
+      const localProgress = segmentRange > 0 ? (progress - startColor.position) / segmentRange : 0;
+      
+      const interpolatedColor = interpolateColor(startColor.color, endColor.color, localProgress);
+      
+      result += `&r&#${interpolatedColor.substring(1)}${char}`;
+    });
+    
+    return result;
+  };
+
+  useEffect(() => {
+    setOutput(generateGradient());
+  }, [text, colors]);
+
+  const addColor = () => {
+    // Find the largest gap between consecutive positions
+    const sortedByPosition = [...colors].sort((a, b) => a.position - b.position);
+    
+    let largestGap = 0;
+    let gapPosition = 50;
+    let insertIndex = colors.length;
+    
+    for (let i = 0; i < sortedByPosition.length - 1; i++) {
+      const gap = sortedByPosition[i + 1].position - sortedByPosition[i].position;
+      if (gap > largestGap) {
+        largestGap = gap;
+        gapPosition = Math.round(sortedByPosition[i].position + gap / 2);
+        // Find where to insert in original array to maintain visual order
+        const nextColorId = sortedByPosition[i + 1].id;
+        insertIndex = colors.findIndex(c => c.id === nextColorId);
+      }
+    }
+    
+    const newColor = { id: nextId, color: '#FF0000', position: gapPosition };
+    
+    // Insert at the correct position in the array
+    const newColors = [...colors];
+    newColors.splice(insertIndex, 0, newColor);
+    
+    setColors(newColors);
+    setNextId(nextId + 1);
+  };
+
+  const removeColor = (id) => {
+    if (colors.length > 2) {
+      setColors(colors.filter(c => c.id !== id));
+    }
+  };
+
+  const updateColor = (id, field, value) => {
+    const newColors = colors.map(c => {
+      if (c.id === id) {
+        if (field === 'position') {
+          return { ...c, [field]: Math.max(0, Math.min(100, parseInt(value) || 0)) };
+        }
+        return { ...c, [field]: value };
+      }
+      return c;
+    });
+    setColors(newColors);
+  };
+
+  const handleMouseDown = (id) => {
+    setDraggingId(id);
+  };
+
+  const handleMouseMove = (e) => {
+    if (draggingId !== null && gradientRef.current) {
+      const rect = gradientRef.current.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      updateColor(draggingId, 'position', Math.round(percentage));
+    }
+  };
+
+  const handleMouseUp = () => {
+    setDraggingId(null);
+  };
+
+  useEffect(() => {
+    if (draggingId !== null) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      return () => {
+        document.removeEventListener('mousemove', handleMouseMove);
+        document.removeEventListener('mouseup', handleMouseUp);
+      };
+    }
+  }, [draggingId]);
+
+  const handleDragStart = (e, id) => {
+    setDraggedItemId(id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, id) => {
+    e.preventDefault();
+    if (draggedItemId === null || draggedItemId === id) return;
+    
+    const draggedIndex = colors.findIndex(c => c.id === draggedItemId);
+    const targetIndex = colors.findIndex(c => c.id === id);
+    
+    if (draggedIndex === -1 || targetIndex === -1) return;
+    
+    const newColors = [...colors];
+    const [draggedItem] = newColors.splice(draggedIndex, 1);
+    newColors.splice(targetIndex, 0, draggedItem);
+    
+    // Auto-redistribute positions evenly based on new order
+    const redistributed = newColors.map((c, index) => ({
+      ...c,
+      position: Math.round((index / (newColors.length - 1)) * 100)
+    }));
+    
+    setColors(redistributed);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItemId(null);
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(output);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const getGradientPreview = () => {
+    // Use the actual order of colors array, not sorted by position
+    return `linear-gradient(to right, ${colors.map(c => `${c.color} ${c.position}%`).join(', ')})`;
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-zinc-900 via-black to-zinc-900 p-8">
+      <style>{`
+        @supports (backdrop-filter: blur(10px)) {
+          .glass {
+            background: rgba(24, 24, 27, 0.6);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+          }
+          .glass-dark {
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+          }
+        }
+        @supports not (backdrop-filter: blur(10px)) {
+          .glass {
+            background: rgba(24, 24, 27, 0.95);
+          }
+          .glass-dark {
+            background: rgba(0, 0, 0, 0.9);
+          }
+        }
+      `}</style>
+      
+      <div className="max-w-5xl mx-auto">
+        <div className="text-center mb-8">
+          <h1 className="text-5xl font-bold text-white mb-3 drop-shadow-lg">
+            MINECRAFT GRADIENT GENERATOR
+          </h1>
+          <p className="text-gray-400 text-lg">
+            Item Rename Mod - Format with &r&#HEX
+          </p>
+        </div>
+
+        <div className="glass p-8 shadow-2xl border-2 border-white/10">
+          {/* Input Text */}
+          <div className="mb-8">
+            <label className="block text-white font-semibold mb-3 text-lg">
+              TEXT INPUT
+            </label>
+            <input
+              type="text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="Enter your item name..."
+              className="w-full px-6 py-4 glass-dark border-2 border-white/20 text-white text-xl focus:outline-none focus:border-white/40 transition-all placeholder-gray-500"
+            />
+          </div>
+
+          {/* Preview */}
+          <div className="mb-8">
+            <label className="block text-white font-semibold mb-3 text-lg">
+              PREVIEW
+            </label>
+            <div className="w-full px-6 py-8 glass-dark border-2 border-white/20 flex items-center justify-center min-h-[100px]">
+              <div 
+                className="text-4xl font-bold inline-block"
+                style={{ 
+                  backgroundImage: getGradientPreview(),
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  color: 'transparent'
+                }}
+              >
+                {text || 'Preview'}
+              </div>
+            </div>
+          </div>
+
+          {/* Gradient Bar Preview with Draggable Sliders */}
+          <div className="mb-8">
+            <label className="block text-white font-semibold mb-3 text-lg">
+              GRADIENT PREVIEW
+            </label>
+            <div className="relative select-none" ref={gradientRef}>
+              <div 
+                className="w-full h-20 border-2 border-white/20 cursor-crosshair"
+                style={{ background: getGradientPreview() }}
+              />
+              {colors.map((colorObj) => (
+                <div
+                  key={colorObj.id}
+                  className="absolute top-0 bottom-0 w-1 cursor-ew-resize"
+                  style={{ left: `${colorObj.position}%` }}
+                  onMouseDown={() => handleMouseDown(colorObj.id)}
+                >
+                  <div className="absolute -top-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-white border-2 border-black cursor-ew-resize shadow-lg" />
+                  <div className="absolute top-0 bottom-0 w-1 bg-white opacity-50" />
+                  <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 glass-dark border-2 border-white/30 px-2 py-1 text-white text-xs font-mono whitespace-nowrap pointer-events-none">
+                    {colorObj.position}%
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Colors */}
+          <div className="mb-8">
+            <div className="flex justify-between items-center mb-4">
+              <label className="text-white font-semibold text-lg">
+                COLORS ({colors.length})
+              </label>
+              <button
+                onClick={addColor}
+                className="flex items-center gap-2 px-4 py-2 bg-white/90 hover:bg-white text-black transition-all font-semibold border-2 border-white/30 shadow-lg"
+              >
+                <Plus size={20} />
+                ADD COLOR
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {colors.map((colorObj) => (
+                <div
+                  key={colorObj.id}
+                  draggable
+                  onDragStart={(e) => handleDragStart(e, colorObj.id)}
+                  onDragOver={(e) => handleDragOver(e, colorObj.id)}
+                  onDragEnd={handleDragEnd}
+                  className={`glass-dark p-4 border-2 border-white/20 cursor-move transition-all hover:border-white/40 ${
+                    draggedItemId === colorObj.id ? 'opacity-50' : ''
+                  }`}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="cursor-move text-gray-400 hover:text-white">
+                      <GripVertical size={24} />
+                    </div>
+                    
+                    <div className="flex-1">
+                      <label className="block text-gray-400 text-sm mb-2">COLOR</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="color"
+                          value={colorObj.color}
+                          onChange={(e) => updateColor(colorObj.id, 'color', e.target.value)}
+                          className="w-16 h-12 cursor-pointer border-2 border-white/30 bg-black"
+                        />
+                        <input
+                          type="text"
+                          value={colorObj.color}
+                          onChange={(e) => updateColor(colorObj.id, 'color', e.target.value)}
+                          className="flex-1 px-3 py-2 glass-dark border-2 border-white/30 text-white focus:outline-none focus:border-white/50 uppercase font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="text-gray-400 text-sm">
+                        POSITION: {colorObj.position}%
+                      </div>
+                      {colors.length > 2 && (
+                        <button
+                          onClick={() => removeColor(colorObj.id)}
+                          className="px-4 py-3 bg-red-600/80 hover:bg-red-600 text-white transition-all border-2 border-red-600/30 shadow-lg"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Output */}
+          <div>
+            <label className="block text-white font-semibold mb-3 text-lg">
+              GENERATED COMMAND
+            </label>
+            <div className="relative">
+              <textarea
+                value={output}
+                readOnly
+                rows={4}
+                className="w-full px-6 py-4 pr-32 glass-dark border-2 border-white/20 text-green-400 font-mono text-sm focus:outline-none resize-none"
+              />
+              <button
+                onClick={copyToClipboard}
+                className={`absolute top-4 right-4 flex items-center gap-2 px-4 py-2 font-semibold transition-all border-2 shadow-lg ${
+                  copied 
+                    ? 'bg-green-600/80 text-white border-green-600/30' 
+                    : 'bg-white/90 hover:bg-white text-black border-white/30'
+                }`}
+              >
+                {copied ? (
+                  <>
+                    <Check size={18} />
+                    COPIED!
+                  </>
+                ) : (
+                  <>
+                    <Copy size={18} />
+                    COPY
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="text-center mt-6 text-gray-400">
+          <p className="text-sm">
+            MADE FOR MINECRAFT 1.20.1 FABRIC - ITEM RENAME MOD
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default MinecraftGradientGenerator;
